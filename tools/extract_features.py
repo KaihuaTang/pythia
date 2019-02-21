@@ -156,6 +156,7 @@ def get_detections_from_im(cfg, model, im, image_id, feat_blob_name,
                                                                 cfg.TEST.SCALE,
                                                                 cfg.TEST.MAX_SIZE,
                                                                 boxes=bboxes)
+        feat_map = workspace.FetchBlob("gpu_0/res5_2_branch2c")
         box_features = workspace.FetchBlob(feat_blob_name)
         cls_prob = workspace.FetchBlob("gpu_0/cls_prob")
         rois = workspace.FetchBlob("gpu_0/rois")
@@ -177,7 +178,7 @@ def get_detections_from_im(cfg, model, im, image_id, feat_blob_name,
         objects = np.argmax(cls_prob[keep_boxes], axis=1)
 
     img_shape = [np.size(im, 0), np.size(im, 1)]
-    return box_features[keep_boxes], cls_boxes[keep_boxes], np.array(img_shape)
+    return feat_map, box_features[keep_boxes], cls_boxes[keep_boxes], np.array(img_shape)
 
     #return {
     #    "image_id": image_id,
@@ -255,21 +256,24 @@ def main(args):
                                     'boxes_'+im_base_name.replace('jpg', 'npy'))
                 shapefile = os.path.join(args.output_dir, 
                                     'shape_'+im_base_name.replace('jpg', 'npy'))
+                featmapfile = os.path.join(args.output_dir, 
+                                    'featmap_'+im_base_name.replace('jpg', 'npy'))
                 lock_folder = outfile.replace('npy', 'lock')
                 if not os.path.exists(lock_folder) and os.path.exists(outfile):
                     continue
                 if not os.path.exists(lock_folder):
                     os.makedirs(lock_folder)
 
-                result, box_result, shape = get_detections_from_im(cfg, model, im, 
+                feat_map, feat_result, box_result, shape = get_detections_from_im(cfg, model, im, 
                                                 image_id,args.feat_name,
                                                 args.min_bboxes, 
                                                 args.max_bboxes, 
                                                 bboxes=bbox)
 
-                np.save(outfile, result)
+                np.save(outfile, feat_result)
                 np.save(boxfile, box_result)
                 np.save(shapefile, shape)
+                np.save(featmapfile, feat_map)
                 os.rmdir(lock_folder)
 
             count += 1

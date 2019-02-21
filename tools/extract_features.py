@@ -176,8 +176,8 @@ def get_detections_from_im(cfg, model, im, image_id, feat_blob_name,
             keep_boxes = np.argsort(max_conf)[::-1][:MAX_BOXES]
         objects = np.argmax(cls_prob[keep_boxes], axis=1)
 
-
-    return box_features[keep_boxes]
+    img_shape = [np.size(im, 0), np.size(im, 1)]
+    return box_features[keep_boxes], cls_boxes[keep_boxes], np.array(img_shape)
 
     #return {
     #    "image_id": image_id,
@@ -190,23 +190,30 @@ def get_detections_from_im(cfg, model, im, image_id, feat_blob_name,
     #}
 
 
-def extract_bboxes(bottom_up_csv_file):
+def extract_bboxes(bottom_up_csv_path):
     image_bboxes = {}
 
-    with open(bottom_up_csv_file, "r") as tsv_in_file:
-        reader = csv.DictReader(tsv_in_file, delimiter='\t', 
-                                fieldnames=BOTTOM_UP_FIELDNAMES)
-        for item in reader:
-            item['num_boxes'] = int(item['num_boxes'])
-            image_id = int(item['image_id'])
-            image_w = float(item['image_w'])
-            image_h = float(item['image_h'])
 
-            bbox = np.frombuffer(
-                base64.b64decode(item['boxes']),
-                dtype=np.float32).reshape((item['num_boxes'], -1))
+    for filename in os.listdir(bottom_up_csv_path):
+        if not '.tsv' in filename:
+            continue
+        full_filename = os.path.join(bottom_up_csv_path, filename)
+        fd = open(full_filename, 'r')
+        reader = csv.DictReader(fd, delimiter='\t', fieldnames=BOTTOM_UP_FIELDNAMES)
+        readers.append(reader)
+    reader = itertools.chain.from_iterable(readers)
 
-            image_bboxes[image_id] = bbox
+    for item in reader:
+        item['num_boxes'] = int(item['num_boxes'])
+        image_id = int(item['image_id'])
+        image_w = float(item['image_w'])
+        image_h = float(item['image_h'])
+
+        bbox = np.frombuffer(
+            base64.b64decode(item['boxes']),
+            dtype=np.float32).reshape((item['num_boxes'], -1))
+
+        image_bboxes[image_id] = bbox
     return image_bboxes
 
 
@@ -238,23 +245,31 @@ def main(args):
         image_id = int(im_base_name.split(".")[0].split("_")[-1])   # for COCO
         if image_id % args.total_group == args.group_id:
             bbox = image_bboxes[image_id] if image_id in image_bboxes else None
+            if bbox is not None:
+                print('Box of {} is not None'.format(str(image_id)))
             im = cv2.imread(im_name)
             if im is not None:
                 outfile = os.path.join(args.output_dir, 
                                     im_base_name.replace('jpg', 'npy'))
+                boxfile = os.path.join(args.output_dir, 
+                                    'boxes_'+im_base_name.replace('jpg', 'npy'))
+                shapefile = os.path.join(args.output_dir, 
+                                    'shape_'+im_base_name.replace('jpg', 'npy'))
                 lock_folder = outfile.replace('npy', 'lock')
                 if not os.path.exists(lock_folder) and os.path.exists(outfile):
                     continue
                 if not os.path.exists(lock_folder):
                     os.makedirs(lock_folder)
 
-                result = get_detections_from_im(cfg, model, im, 
+                result, box_result, shape = get_detections_from_im(cfg, model, im, 
                                                 image_id,args.feat_name,
                                                 args.min_bboxes, 
                                                 args.max_bboxes, 
                                                 bboxes=bbox)
 
                 np.save(outfile, result)
+                np.save(boxfile, box_result)
+                np.save(shapefile, shape)
                 os.rmdir(lock_folder)
 
             count += 1
